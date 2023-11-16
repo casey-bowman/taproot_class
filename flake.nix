@@ -24,6 +24,9 @@
           ];
           # Automatically run jupyter when entering the shell.
           #shellHook = "jupyter notebook";
+
+          BITCOIN_BIN_DIR= "${pkgs.bitcoind}/bin";
+          PATH_TO_LIGHTNING = "${pkgs.clightning}/bin";
         };
       });
 }
