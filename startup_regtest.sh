@@ -41,8 +41,8 @@ if [ -z "$PATH_TO_LIGHTNING" ]; then
 	LCLI=lightning-cli
 	LIGHTNINGD=lightningd
 else
-	LCLI="$PATH_TO_LIGHTNING"/cli/lightning-cli
-	LIGHTNINGD="$PATH_TO_LIGHTNING"/lightningd/lightningd
+	LCLI="$PATH_TO_LIGHTNING"/lightning-cli
+	LIGHTNINGD="$PATH_TO_LIGHTNING"/lightningd
 	# This mirrors "type" output above.
 	echo lightning-cli is "$LCLI"
 	echo lightningd is "$LIGHTNINGD"
@@ -58,6 +58,13 @@ if [ -z "$PATH_TO_BITCOIN" ]; then
 		return
 	fi
 fi
+BCLI="$BITCOIN_BIN_DIR"/bitcoin-cli
+BTCD="$BITCOIN_BIN_DIR"/bitcoind
+
+echo bitcoin datadir is "$PATH_TO_BITCOIN"
+echo bitcoind is "$BTCD"
+echo bitcoin-cli is "$BCLI"
+
 
 start_nodes() {
 	if [ -z "$1" ]; then
@@ -137,30 +144,30 @@ start_nodes() {
 start_ln() {
 	# Start bitcoind in the background
 	test -f "$PATH_TO_BITCOIN/regtest/bitcoind.pid" || \
-		bitcoind -datadir="$PATH_TO_BITCOIN" -regtest -txindex -fallbackfee=0.00000253 -daemon
+		"$BTCD" -datadir="$PATH_TO_BITCOIN" -regtest -txindex -fallbackfee=0.00000253 -daemon
 
 	# Wait for it to start.
-	while ! bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest ping 2> /tmp/null; do echo "awaiting bitcoind..." && sleep 1; done
+	while ! "$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest ping; do echo "awaiting bitcoind..." && sleep 1; done
 
 	# Check if default wallet exists
-	if ! bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest listwalletdir | jq -r '.wallets[] | .name' | grep -wqe 'default' ; then
+	if ! "$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest listwalletdir | jq -r '.wallets[] | .name' | grep -wqe 'default' ; then
 		# wallet dir does not exist, create one
 		echo "Making \"default\" bitcoind wallet."
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest createwallet default >/dev/null 2>&1
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest createwallet default >/dev/null 2>&1
 	fi
 
 	# Check if default wallet is loaded
-	if ! bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest listwallets | jq -r '.[]' | grep -wqe 'default' ; then
+	if ! "$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest listwallets | jq -r '.[]' | grep -wqe 'default' ; then
 		echo "Loading \"default\" bitcoind wallet."
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest loadwallet default >/dev/null 2>&1
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest loadwallet default >/dev/null 2>&1
 	fi
 
 	# Kick it out of initialblockdownload if necessary
-	if bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest getblockchaininfo | grep -q 'initialblockdownload.*true'; then
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 1 "$(bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest getnewaddress)" > /dev/null
+	if "$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest getblockchaininfo | grep -q 'initialblockdownload.*true'; then
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 1 "$("$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest getnewaddress)" > /dev/null
 	fi
 
-	alias bt-cli='bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest'
+	alias bt-cli='"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest'
 
 	if [ -z "$1" ]; then
 		nodes=2
@@ -174,16 +181,16 @@ start_ln() {
 ensure_bitcoind_funds() {
 
 	if [ -z "$ADDRESS" ]; then
-		ADDRESS=$(bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getnewaddress)
+		ADDRESS=$("$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getnewaddress)
 	fi
 
-	balance=$(bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getbalance)
+	balance=$("$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getbalance)
 
 	if [ 1 -eq "$(echo "$balance"'<1' | bc -l)" ]; then
 
 		printf "%s" "Mining into address " "$ADDRESS""... "
 
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 100 "$ADDRESS" > /dev/null
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 100 "$ADDRESS" > /dev/null
 
 		echo "done."
 	fi
@@ -210,11 +217,11 @@ fund_nodes() {
 
 	WALLET="-rpcwallet=$WALLET"
 
-	ADDRESS=$(bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getnewaddress)
+	ADDRESS=$("$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getnewaddress)
 
 	ensure_bitcoind_funds
 
-	echo "bitcoind balance:" "$(bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getbalance)"
+	echo "bitcoind balance:" "$("$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" getbalance)"
 
 	last_node=""
 
@@ -238,9 +245,9 @@ fund_nodes() {
 
 		ensure_bitcoind_funds
 
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1 > /dev/null
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest "$WALLET" sendtoaddress "$L1_WALLET_ADDR" 1 > /dev/null
 
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 1 "$ADDRESS" > /dev/null
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 1 "$ADDRESS" > /dev/null
 
 		printf "%s" "Waiting for lightning node funds... "
 
@@ -255,7 +262,7 @@ fund_nodes() {
 
 		$LCLI --lightning-dir=/tmp/l"$node1"-regtest fundchannel "$L2_NODE_ID" 1000000 > /dev/null
 
-		bitcoin-cli -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 6 "$ADDRESS" > /dev/null
+		"$BCLI" -datadir="$PATH_TO_BITCOIN" -regtest generatetoaddress 6 "$ADDRESS" > /dev/null
 
 		printf "%s" "Waiting for confirmation... "
 
